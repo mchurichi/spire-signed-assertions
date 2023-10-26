@@ -1,0 +1,13 @@
+With modifications in workload api to add LSVID support. It is compiling. needs to test the new funcs.
+
+
+25/10 - 
+need to update handler.go to encode b64 the lsvid payload and do the necessary adjs
+	// svid, err := h.c.Manager.FetchJWTSVID(ctx, wlSpiffeId, []string{base64.RawURLEncoding.EncodeToString([]byte(wlPayload))})
+
+Something is failing, maybe some problem regarding the format that is not jwt
+
+
+trabalhando no handler, cert2lsr, precisa tirar os dados necessarios do cert pra gerar o LSVID 
+
+the cert2LSVID func in handler needs to be checked. Its outdated, but not being used currently. Bundles is correct?

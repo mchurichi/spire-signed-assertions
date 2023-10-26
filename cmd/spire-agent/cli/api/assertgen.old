@@ -1,0 +1,282 @@
+package api
+
+import (
+
+	"crypto/ecdsa"
+	"encoding/base64"
+	"fmt"
+	"context"
+	"crypto/x509"
+    "encoding/pem"
+	hash256 "crypto/sha256"
+	"crypto"
+	"encoding/json"
+	"strings"
+	"crypto/rand"
+
+	"github.com/mitchellh/cli"
+	common_cli "github.com/spiffe/spire/pkg/common/cli"
+	
+
+	// To selectors assertion
+	"github.com/spiffe/spire/proto/spire/common"
+	"github.com/spiffe/spire/pkg/agent/catalog"
+	"github.com/spiffe/spire/pkg/agent/plugin/workloadattestor"
+	"github.com/sirupsen/logrus/hooks/test"
+
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
+
+	// "github.com/spiffe/spire/pkg/common/pemutil"
+	"flag"
+	"log"
+	"errors"
+
+	
+)
+
+const (
+	// Workload API socket path
+	socketPath	= "unix:///tmp/spire-agent/public/api.sock"
+	
+)
+
+
+func NewassertgenCommand() cli.Command {
+	return newassertgenCommand(common_cli.DefaultEnv, newWorkloadClient)
+}
+
+func newassertgenCommand(env *common_cli.Env, clientMaker workloadClientMaker) cli.Command {
+	return adaptCommand(env, clientMaker, new(assertgenCommand))
+}
+
+type assertgenCommand struct {
+	// audience common_cli.CommaStringsFlag
+	oauth string
+	audience string
+}
+
+func (c *assertgenCommand) name() string {
+	return "generate SVID-NG"
+}
+
+func (c *assertgenCommand) synopsis() string {
+	return "Generate a SVID-NG given an OAuth token"
+}
+
+func (c *assertgenCommand) run(ctx context.Context, env *common_cli.Env, client *workloadClient) error {
+
+	// if c.audience == "" {
+	// 	return errors.New("audience must be specified")
+	// }
+	if len(c.oauth) == 0 {
+		return errors.New("OAuth must be specified")
+	}
+
+	resp, err := c.genSVIDNG(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	return env.Println("SVID-NG    :", resp)
+
+	// // Fetch claims data
+	// clientSVID 		:= FetchX509SVID()
+	// clientID 		:= clientSVID.ID.String()
+	// pid 			:= os.Getpid()
+
+	// // timestamp
+	// issue_time 		:= time.Now().Round(0).Unix()
+
+	// // generate encoded key
+	// pubkey 		:= testKey.Public().(*ecdsa.PublicKey)
+	// issuer, _ 	:= EncodeECDSAPublicKey(pubkey)
+
+	// // Retrieve selectors
+	// selectors, err := ReturnSelectors(pid)
+	// if err != nil {
+	// 	log.Fatalf("Error retrieving selectors: %v", err)
+	// }
+
+	// // Define assertion claims
+	// assertionclaims := map[string]interface{}{
+	// 	"iss"		:		issuer,
+	// 	"iat"		:	 	issue_time,
+	// 	"sub"		:		clientID,
+	// 	"sel"		:		selectors,
+	// }
+	// assertion, err := NewECDSAencode(assertionclaims, "", testKey)
+	// if err != nil {
+	// 	log.Fatalf("Error generating signed assertion: %v", err)
+	// } 
+
+	// log.Println("Generated assertion: ", fmt.Sprintf("%s",assertion))
+
+	// return nil
+}
+
+func (c *assertgenCommand) genSVIDNG(ctx context.Context, client *workloadClient) (*AssertgenCommandResponse, error) {
+	ctx, cancel := client.prepareContext(ctx)
+	defer cancel()
+	// resp, err := client.OAuth2SVIDNG(ctx, &workload.AssertgenCommandRequest{
+	// 	Oauth:     c.oauth,
+	// })
+
+	return client.OAuth2SVIDNG(ctx, &workload.AssertgenCommandRequest{
+		Oauth: c.oauth,
+		// SpiffeId: c.spiffeID,
+	})
+
+	// // resp, err := client.OAuth2SVIDNG(ctx, c.oauth)
+	// if err != nil {
+	// 	if s := status.Convert(err); s.Code() == codes.InvalidArgument {
+	// 		return nil, fmt.Errorf("Oauth is not valid: %v", s.Message())
+	// 	}
+	// 	return nil, fmt.Errorf("unable to generate SVID-NG: %w", err)
+	// }
+	// return resp, nil
+}
+
+// Fetch workload X509 SVID
+func FetchX509SVID() *x509svid.SVID {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	
+	// Create a `workloadapi.X509Source`, it will connect to Workload API using provided socket.
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr(socketPath)))
+	if err != nil {
+		log.Fatalf("Unable to create X509Source: %v", err)
+	}
+	defer source.Close()
+
+	svid, err := source.GetX509SVID()
+	if err != nil {
+		log.Fatalf("Unable to fetch SVID: %v", err)
+	}
+
+	return svid
+}
+
+// EncodeECDSAPublicKey encodes an *ecdsa.PublicKey to PEM format.
+//  TODO: FIX type, that should be different based on input key type
+// At this time it only support ECDSA
+func EncodeECDSAPublicKey(key *ecdsa.PublicKey) ([]byte, error) {
+
+	derKey, err := x509.MarshalPKIXPublicKey(key)
+		if err != nil {
+			return nil, err
+		}
+
+	keyBlock := &pem.Block{
+		Type:  "EC PUBLIC KEY",
+		Bytes: derKey,
+	}
+
+	return pem.EncodeToMemory(keyBlock), nil
+}
+
+// returnSelectors return selectors of a given PID
+func ReturnSelectors(pid int) (string, error) {
+	logg, _ := test.NewNullLogger()
+
+	// set config parameters
+	minimalConfig := func() catalog.Config {
+		return catalog.Config{
+			Log: logg,
+			PluginConfig: catalog.HCLPluginConfigMap{
+				"KeyManager": {
+					"memory": {},
+				},
+				"NodeAttestor": {
+					"join_token": {},
+				},
+				"WorkloadAttestor": {
+					"docker": {},
+					"unix": {},
+				},
+			},
+		}
+	}
+	config := minimalConfig()
+
+	// retrieve attestators
+	repo, _ := catalog.Load(context.Background(), config)
+	plugins := repo.GetWorkloadAttestors()
+
+	sChan := make(chan []*common.Selector)
+	errChan := make(chan error)
+
+	// Attest
+	for _, p := range plugins {
+		go func(p workloadattestor.WorkloadAttestor) {
+			if selectors, err := p.Attest(context.Background(), pid); err == nil {
+				sChan <- selectors
+			} else {
+				errChan <- err
+			}
+		}(p)
+	}
+
+	// Collect the results
+	selectors := []*common.Selector{}
+	for i := 0; i < len(plugins); i++ {
+		select {
+		case s := <-sChan:
+			selectors = append(selectors, s...)
+		case err := <-errChan:
+			log.Fatal("Failed to collect all selectors for PID", err)
+		}
+	}
+	result, err := json.Marshal(selectors)
+	if err != nil {
+		log.Fatal("Error marshalling selectors", err)
+	}
+
+	return fmt.Sprintf("%s", result), nil
+}
+
+// generate a new ecdsa signed encoded assertion
+func NewECDSAencode(claimset map[string]interface{}, oldmain string, key crypto.Signer) (string, error) {
+
+	//  Marshall received claimset into JSON
+	cs, _ := json.Marshal(claimset)
+	payload := base64.RawURLEncoding.EncodeToString(cs)
+
+	// If no oldmain, generates a simple assertion
+	if oldmain == "" {
+		hash 	:= hash256.Sum256([]byte(payload))
+		s, err 	:= ecdsa.SignASN1(rand.Reader, key.(*ecdsa.PrivateKey), hash[:])
+		if err 	!= nil {
+			fmt.Printf("Error signing: %s\n", err)
+			return "", err
+		}
+		sig := base64.RawURLEncoding.EncodeToString(s)
+		encoded := strings.Join([]string{payload, sig}, ".")
+
+		fmt.Printf("\nAssertion size: %d\n", len(payload) + len(sig))
+
+		return encoded, nil
+	}
+	
+	//  Otherwise, append assertion to previous content (oldmain) and sign it
+	hash	:= hash256.Sum256([]byte(payload + "." + oldmain))
+	s, err 	:= ecdsa.SignASN1(rand.Reader, key.(*ecdsa.PrivateKey), hash[:])
+	if err != nil {
+		fmt.Printf("Error signing: %s\n", err)
+		return "", err
+	}
+	signature := base64.RawURLEncoding.EncodeToString(s)
+	encoded := strings.Join([]string{payload, oldmain, signature}, ".")
+	
+	fmt.Printf("\nAssertion size: %d\n", len(payload) + len(oldmain)+ len(signature))
+
+	return encoded, nil
+}
+
+func (c *assertgenCommand) appendFlags(fs *flag.FlagSet) {
+	fs.StringVar(&c.oauth, "OAuth", "", "OAuth token")
+	// fs.StringVar(&c.audience, "Subject", "", "Subject SPIFFE-ID")
+	// fs.DurationVar(&c.ttl, "ttl", 0, "TTL of the JWT-SVID")
+	// fs.Var(&c.audience, "audience", "Audience claim that will be included in the SVID. Can be used more than once.")
+	// fs.StringVar(&c.write, "write", "", "File to write token to instead of stdout")
+}

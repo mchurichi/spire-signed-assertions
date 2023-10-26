@@ -1,0 +1,33 @@
+run:
+  # timeout for analysis, e.g. 30s, 5m, default is 1m
+  deadline: 10m
+
+  skip-dirs:
+    - testdata$
+    - test/mock
+
+  skip-files:
+    - ".*\\.pb\\.go"
+    - support/k8s/k8s-workload-registrar/mode-crd/api/spiffeid/v1beta1/spiffeid_types.go
+
+linters:
+  enable:
+    - bodyclose
+    - depguard
+    - durationcheck
+    - errorlint
+    - goimports
+    - revive
+    - gosec
+    - misspell
+    - nolintlint
+    - nakedret
+    - unconvert
+    - unparam
+    - whitespace
+    - gocritic
+
+linters-settings:
+  revive:
+    # minimal confidence for issues, default is 0.8
+    confidence: 0.0

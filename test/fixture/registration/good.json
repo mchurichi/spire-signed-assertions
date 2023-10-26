@@ -1,0 +1,43 @@
+{
+    "entries": [
+        {
+            "selectors": [
+                {
+                    "type": "unix",
+                    "value": "uid:1111"
+                }
+            ],
+            "spiffe_id": "spiffe://example.org/Blog",
+            "parent_id": "spiffe://example.org/spire/agent/join_token/TokenBlog",
+            "ttl": 200,
+            "admin": true
+        },
+        {
+            "selectors": [
+                {
+                    "type": "unix",
+                    "value": "uid:1111"
+                }
+            ],
+            "spiffe_id": "spiffe://example.org/Database",
+            "parent_id": "spiffe://example.org/spire/agent/join_token/TokenDatabase",
+            "ttl": 200
+        },
+        {
+            "selectors": [
+                {
+                    "type": "type",
+                    "value": "key1:value"
+                },
+                {
+                    "type": "type",
+                    "value": "key2:value"
+                }
+            ],
+            "spiffe_id": "spiffe://example.org/storesvid",
+            "parent_id": "spiffe://example.org/spire/agent/join_token/TokenDatabase",
+            "ttl": 200,
+	    "store_svid": true
+        }
+    ]
+}
