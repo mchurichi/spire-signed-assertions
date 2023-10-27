@@ -11,3 +11,13 @@ Something is failing, maybe some problem regarding the format that is not jwt
 trabalhando no handler, cert2lsr, precisa tirar os dados necessarios do cert pra gerar o LSVID 
 
 the cert2LSVID func in handler needs to be checked. Its outdated, but not being used currently. Bundles is correct?
+
+
+---
+
+O get bundles n pode fazer simplesmente 
+	payload, err := s.getBundleLSVIDPayload(ctx)
+	if err != nil {
+		return nil, api.MakeErr(log, codes.Internal, "failed retrieving bundle LSVID payload", err)
+	}
+já ta fazendo isso no FetchJWTSVID

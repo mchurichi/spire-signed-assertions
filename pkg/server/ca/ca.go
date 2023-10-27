@@ -22,10 +22,32 @@ import (
 	"github.com/zeebo/errs"
 
 	hash256 "crypto/sha256"
-	"strings"
+	// "strings"
 	"encoding/base64"
 	// "bytes"
+	"encoding/json"
 )
+
+type IDClaim struct {
+	CN	string		`json:"cn,omitempty"`
+	PK	string		`json:"pk,omitempty"`
+	LS	*LSVID		`json:"ls,omitempty"`
+}
+
+type Payload struct {
+	Ver int8		`json:"ver,omitempty"`
+	Alg string		`json:"alg,omitempty"`
+	Iss	*IDClaim	`json:"iss,omitempty"`
+	Iat	int64		`json:"iat,omitempty"`
+	Sub	*IDClaim	`json:"sub,omitempty"`
+	Aud	*IDClaim	`json:"aud,omitempty"`
+}
+
+type LSVID struct {	
+	Previous	*LSVID		`json:"previous,omitempty"`
+	Payload		*Payload	`json:"payload"`
+	Signature	[]byte		`json:"signature"`
+}
 
 const (
 	// DefaultX509SVIDTTL is the TTL given to X509 SVIDs if not overridden by
@@ -295,7 +317,7 @@ func (ca *CA) SignX509CASVID(ctx context.Context, params X509CASVIDParams) ([]*x
 
 func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) {
 
-	var wlLSVID string
+	var encLSVID string
 	// signKey := ca.X509CA() //preferably
 	signKey := ca.JWTKey()
 	if signKey == nil {
@@ -308,36 +330,40 @@ func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) 
 
 	for i:=0;i<len(payloads);i++ {
 
-		// parts := strings.Split(payloads[i], ",")
-		// fmt.Printf("\nIssuer		: %v\n", parts[1])
-		// fmt.Printf("CA Name		: %v\n", ca.c.CASubject.CommonName)
-		// if parts[1] != ca.c.CASubject.CommonName {
-			// return "", errs.New("Invalid issuer!")
-		// }
-		// fmt.Printf("Subject		: %v\n", parts[2])
-		// fmt.Printf("Subject PK	: %v\n", parts[3])
 		fmt.Printf("Signing payload %v of %v: %v\n\n", i+1, len(payloads), payloads[i])
 		
-		encdPayload := base64.RawURLEncoding.EncodeToString([]byte(payloads[i]))
-		hash 	:= hash256.Sum256([]byte(encdPayload))
+		hash 	:= hash256.Sum256([]byte(payloads[i]))
 		s, err 	:= signKey.Signer.Sign(rand.Reader, hash[:], crypto.SHA256)
 		if err 	!= nil {
 			fmt.Printf("Error signing: %s\n", err)
 			return "", err
 		}
-		// Encode signature
-		sig := base64.RawURLEncoding.EncodeToString(s)
 
 		// Concatenate payload and signature
-		tmp := strings.Join([]string{encdPayload, sig}, ".")
-		fmt.Printf("Resulting LSVID: %v\n\n", tmp)
-		if i==0 {
-			wlLSVID = tmp
-		} else {
-			wlLSVID = strings.Join([]string{wlLSVID, tmp}, ".")
+		var decPayload Payload
+		err = json.Unmarshal([]byte(payloads[i]), &decPayload)
+		if err != nil {
+			return "", errs.New("error unmarshaling LSVID payload: %v", err)
 		}
+
+		// Create the resulting LSVID
+		outputLSVID := LSVID{
+			Payload: &decPayload,
+			Signature: s,
+		}
+
+		fmt.Printf("Decoded LSVID: %v\n\n", outputLSVID)
+
+
+		encLSVID, err = ca.EncodeLSVID(outputLSVID)
+		if err != nil {
+			return "", errs.New("error encoding LSVID: %v", err)
+		}
+
+
+		fmt.Printf("Encoded LSVID: %v\n\n", encLSVID)
 	}
-	return wlLSVID, nil
+	return encLSVID, nil
 }
 
 func (ca *CA) capLifetime(ttl time.Duration, expirationCap time.Time) (notBefore, notAfter time.Time) {
@@ -381,4 +407,36 @@ func (ca *CA) X509PubKey() crypto.PublicKey {
 
 	return cakey.Signer.Public()
 
+}
+
+
+func (ca *CA) EncodeLSVID(lsvid LSVID) (string, error) {
+	// Marshal the LSVID struct into JSON
+	lsvidJSON, err := json.Marshal(lsvid)
+	if err != nil {
+		return "", errs.New("error marshaling LSVID to JSON: %v", err)
+	}
+
+	// Encode the JSON byte slice to Base64.RawURLEncoded string
+	encLSVID := base64.RawURLEncoding.EncodeToString(lsvidJSON)
+
+	return encLSVID, nil
+}
+
+func (ca *CA) DecodeLSVID(encLSVID string) (LSVID, error) {
+
+	// Decode the base64.RawURLEncoded LSVID
+	decoded, err := base64.RawURLEncoding.DecodeString(encLSVID)
+	if err != nil {
+		return LSVID{}, errs.New("error decoding LSVID: %v", err)
+	}
+
+	// Unmarshal the byte slice into your struct
+	var decLSVID LSVID
+	err = json.Unmarshal(decoded, &decLSVID)
+	if err != nil {
+		return LSVID{}, errs.New("error unmarshaling LSVID: %v", err)
+	}
+
+	return decLSVID, nil
 }

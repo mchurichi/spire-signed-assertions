@@ -27,20 +27,26 @@ import (
 	"encoding/json"
 	"crypto/ecdsa"
 )
+
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
 	PK	string		`json:"pk,omitempty"`
-	LS	string		`json:"ls,omitempty"`
+	LS	*LSVID		`json:"ls,omitempty"`
 }
 
-
-type LSVID struct {	
+type Payload struct {
 	Ver int8		`json:"ver,omitempty"`
 	Alg string		`json:"alg,omitempty"`
-	Iss	IDClaim		`json:"iss,omitempty"`
+	Iss	*IDClaim	`json:"iss,omitempty"`
 	Iat	int64		`json:"iat,omitempty"`
-	Sub	IDClaim		`json:"sub,omitempty"`
-	Aud	IDClaim		`json:"aud,omitempty"`
+	Sub	*IDClaim	`json:"sub,omitempty"`
+	Aud	*IDClaim	`json:"aud,omitempty"`
+}
+
+type LSVID struct {	
+	Previous	*LSVID		`json:"previous,omitempty"`
+	Payload		*Payload	`json:"payload"`
+	Signature	[]byte		`json:"signature"`
 }
 
 
@@ -313,28 +319,31 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 		return nil, api.MakeErr(log, status.Code(err), "rejecting request due to JWT signing request rate limiting", err)
 	}
 
-	// Add Trust bundle LSVID payload as first LSVID
-	// payload := s.getTrustBundleLSVID(ctx)
-	payload, err := s.getBundleLSVIDPayload(ctx)
-	if err != nil {
-		return nil, api.MakeErr(log, codes.Internal, "failed retrieving bundle LSVID payload", err)
-	}
+	// // Add Trust bundle LSVID payload as first LSVID
+	// // payload := s.getTrustBundleLSVID(ctx)
+	// payload, err := s.getBundleLSVIDPayload(ctx)
+	// if err != nil {
+	// 	return nil, api.MakeErr(log, codes.Internal, "failed retrieving bundle LSVID payload", err)
+	// }
 
-	// Append all received LSVIDs
-	payload = append(payload, req.Audience...)
+	// // Append all received LSVIDs
+	// payload = append(payload, req.Audience...)
 
 	// Request signature of all LSVID payloads
-	lsvid, err := s.ca.SignLSVID(ctx, payload)
+	fmt.Printf("Value to be signed: %v\n", req.Audience)
+	lsvid, err := s.ca.SignLSVID(ctx, req.Audience)
 	if err != nil {
 		return nil, api.MakeErr(log, codes.Internal, "failed to sign JWT-SVID", err)
 	}
+	fmt.Printf("Signed LSVID: %s\n", lsvid)
 
 	outLSVID := &types.JWTSVID{
-		Token: lsvid,
-		IssuedAt:  time.Now().Unix(),
-		ExpiresAt:  time.Now().Unix(), 
+		Token:		lsvid,
+		IssuedAt:	time.Now().Unix(),
+		ExpiresAt:	time.Now().Add(3 * time.Minute).Unix(), 
 	}
 	// log.Debug("resulting outLSVID: ", outLSVID)
+	fmt.Printf("resulting outLSVID: %s\n", outLSVID)
 
 	response := &svidv1.NewJWTSVIDResponse{
 		Svid: outLSVID,
@@ -474,7 +483,7 @@ func (s *Service) getBundleLSVIDPayload(ctx context.Context) ([]string, error) {
 func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (string, error) {
 
 	log := rpccontext.Logger(ctx)
-	var tmpPayload LSVID
+	var tmpPayload *Payload
 	var jsonData []byte
 	var sub  string
 	var pub interface{}
@@ -503,15 +512,15 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		}
 		capubkey :=  base64.RawURLEncoding.EncodeToString(tmppk)
 
-		tmpPayload = LSVID{
+		tmpPayload = &Payload{
 			Ver:	0,
 			Alg:	"ES256",
 			Iat:	time.Now().Round(0).Unix(),
-			Iss:	IDClaim{
+			Iss:	&IDClaim{
 				CN:	s.td.IDString(),
 				PK:	capubkey,
 			},
-			Sub:	IDClaim{
+			Sub:	&IDClaim{
 				CN:	s.td.IDString(),
 				PK:	capubkey,
 			},
@@ -545,15 +554,15 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		}
 		pubkey :=  base64.RawURLEncoding.EncodeToString(tmpPKSub)
 
-		tmpPayload := LSVID{
+		tmpPayload := &Payload{
 			Ver:	1,
 			Alg:	"ES256",
 			Iat:	time.Now().Round(0).Unix(),
-			Iss:	IDClaim{
+			Iss:	&IDClaim{
 				CN:	s.td.IDString(),
 				PK:	capubkey,
 			},
-			Sub:	IDClaim{
+			Sub:	&IDClaim{
 				CN:	sub,
 				PK:	pubkey,
 			},
