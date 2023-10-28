@@ -40,19 +40,26 @@ import (
 	mint "github.com/golang-jwt/jwt"
 )
 
+
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
-	PK	string		`json:"pk,omitempty"`
+	PK	[]byte		`json:"pk,omitempty"`
 	LS	*LSVID		`json:"ls,omitempty"`
 }
 
 type Payload struct {
 	Ver int8		`json:"ver,omitempty"`
 	Alg string		`json:"alg,omitempty"`
-	Iss	*IDClaim	`json:"iss,omitempty"`
 	Iat	int64		`json:"iat,omitempty"`
+	Iss	*IDClaim	`json:"iss,omitempty"`
 	Sub	*IDClaim	`json:"sub,omitempty"`
 	Aud	*IDClaim	`json:"aud,omitempty"`
+}
+
+type LSVID struct {	
+	Previous	*LSVID		`json:"previous,omitempty"`
+	Payload		*Payload	`json:"payload"`
+	Signature	[]byte		`json:"signature"`
 }
 
 // type Layer struct {	
@@ -64,12 +71,6 @@ type Payload struct {
 // type LSVID struct {	
 // 	Layers	[]Layer
 // }
-
-type LSVID struct {	
-	Previous	*LSVID		`json:"previous,omitempty"`
-	Payload		*Payload	`json:"payload"`
-	Signature	[]byte		`json:"signature"`
-}
 
 type Manager interface {
 	SubscribeToCacheChanges(cache.Selectors) cache.Subscriber
@@ -127,39 +128,48 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v", err)
 	}
+	// encode payload
+	encodedPayload := base64.RawURLEncoding.EncodeToString(lsvidPayload)
 
 	// Retrieve the workload SPIFFE-ID
-	wlSpiffeId, err := spiffeid.New("example.org", identities[0].Entry.SpiffeId)
+	wlSpiffeId, err := spiffeid.FromString(identities[0].Entry.SpiffeId)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v", err)
 	}
 
 	// Sign workload LSR using modified FetchJWTSVID endpoint
-	svid, err := h.c.Manager.FetchJWTSVID(ctx, wlSpiffeId, []string{fmt.Sprintf("%s", lsvidPayload)})
+	svid, err := h.c.Manager.FetchJWTSVID(ctx, wlSpiffeId, []string{encodedPayload})
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v", err)
 	}
 	log.Info("Workload LSVID signed by server	: ", fmt.Sprintf("%s", svid))
 
-	//Generate Agent LSVID to test embedding it in issuer claim
+	// // Generate Agent LSVID to test embedding it in issuer claim
+
+	// Generate LSR from Agent certificate
+	// TODO Create a func to create LSR without using a x509 cert
 	agentPayload, err := h.cert2LSR(h.c.AgentSVID[0], h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v", err)
 	}
 
+	//  Marshal payload
 	agentLSVIDPayload, err := json.Marshal(agentPayload)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v", err)
 	}
+	// encode payload
+	agentEncodedPayload := base64.RawURLEncoding.EncodeToString(agentLSVIDPayload)
 
 	// Retrieve the workload SPIFFE-ID
-	agentSpiffeId, err := spiffeid.New("example.org", h.c.AgentSVID[0].URIs[0].String())
+	agentSpiffeId, err := spiffeid.FromString(h.c.AgentSVID[0].URIs[0].String())
+	// spiffeid.New("example.org", h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v", err)
 	}
 
 	// Sign workload LSR using modified FetchJWTSVID endpoint
-	agentLSVID, err := h.c.Manager.FetchJWTSVID(ctx, agentSpiffeId, []string{fmt.Sprintf("%s", agentLSVIDPayload)})
+	agentLSVID, err := h.c.Manager.FetchJWTSVID(ctx, agentSpiffeId, []string{agentEncodedPayload})
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v", err)
 	}
@@ -171,7 +181,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	} 
 
 	// Now, extend LSVID using agent key.
-	tmpPayload := &Payload{
+	extendedPayload := &Payload{
 		Ver:	1,
 		Alg:	"ES256",
 		Iat:	time.Now().Round(0).Unix(),
@@ -190,34 +200,16 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 		log.Fatalf("Error decoding LSVID: %v", err)
 	} 
 
-	extLSVID := &LSVID{
-		Previous:	decLSVID,
-		Payload:	tmpPayload,
-	}
-
-	//  Marshal to JSON
-	tmpToSign, err := json.Marshal(extLSVID)
+	extLSVID, err := h.ExtendLSVID(decLSVID, extendedPayload, h.c.AgentPrivKey)
 	if err != nil {
-		log.Fatalf("Error generating json: %v", err)
+		log.Fatalf("Error extending LSVID: %v", err)
 	} 
 
-	hash 	:= hash256.Sum256(tmpToSign)
-	s, err := h.c.AgentPrivKey.Sign(rand.Reader, hash[:], crypto.SHA256)
-	if err != nil {
-		log.Fatalf("Error generating signed assertion: %v", err)
-	} 
-
-	extLSVID.Signature = s
-
-	outLSVID, err := h.EncodeLSVID(extLSVID)
-	if err != nil {
-		log.Fatalf("Error encoding LSVID: %v", err)
-	} 
-
+	// Format response
 	resp = new(workload.JWTSVIDResponse)
 	resp.Svids = append(resp.Svids, &workload.JWTSVID{
 		SpiffeId: identities[0].Entry.SpiffeId,
-		Svid:     outLSVID,
+		Svid:     extLSVID,
 	})
 
 	return resp, nil
@@ -798,7 +790,7 @@ func (h *Handler) cert2LSR(cert *x509.Certificate, audience string) (*Payload, e
 	if err != nil {
 		return &Payload{}, err
 	}
-	pubkey :=  base64.RawURLEncoding.EncodeToString(tmppk)
+	// pubkey :=  base64.RawURLEncoding.EncodeToString(tmppk)
 
 	// Versioning needs TBD. For poc, considering vr = 1 to ECDSA.
 	sub := cert.URIs[0].String()
@@ -812,47 +804,12 @@ func (h *Handler) cert2LSR(cert *x509.Certificate, audience string) (*Payload, e
 		},
 		Sub:	&IDClaim{
 			CN:	sub,
-			PK:	pubkey,
+			PK:	tmppk,
 		},
 		Aud:	&IDClaim{
 			CN:	audience,
 		},
 	}
-
-	// jsonData, err := json.Marshal(tmpPayload)
-	// if err != nil {
-	// 	return "", err
-	// }
-
-	// // If no oldmain, generates a simple id
-	// if oldmain == "" {
-	
-	// 	// hash and sign payload
-	// 	hash 	:= hash256.Sum256([]byte(payload))
-	// 	s, err 	:= key.Sign(rand.Reader, hash[:], crypto.SHA256)
-	// 	if err 	!= nil {
-	// 		fmt.Printf("Error signing: %s\n", err)
-	// 		return "", err
-	// 	}
-	// 	// Encode signature
-	// 	sig := base64.RawURLEncoding.EncodeToString(s)
-	// 	// Concatenate payload and signature
-	// 	encoded := strings.Join([]string{payload, sig}, ".")
-
-	// 	return encoded, nil
-	// }
-	
-	//  Otherwise, append id to previous content and sign it
-	// hash	:= hash256.Sum256([]byte(payload + "." + oldmain))
-	// s, err 	:= key.Sign(rand.Reader, hash[:], crypto.SHA256)
-	// if err != nil {
-	// 	fmt.Printf("Error signing: %s\n", err)
-	// 	return "", err
-	// }
-	// signature := base64.RawURLEncoding.EncodeToString(s)
-	// encoded := strings.Join([]string{payload, oldmain, signature}, ".")
-	
-	// fmt.Printf("LSVID payload generated: %s\n", lsvidPayload)
 
 	return lsvidPayload, nil
 }
@@ -889,4 +846,40 @@ func (h *Handler) DecodeLSVID(encLSVID string) (*LSVID, error) {
     }
 
     return &decLSVID, nil
+}
+
+func (h *Handler) ExtendLSVID(lsvid *LSVID, newPayload *Payload, key crypto.Signer) (string, error) {
+
+	// Create the extended LSVID structure
+	extLSVID := &LSVID{
+		Previous:	lsvid,
+		Payload:	newPayload,
+	}
+
+	// Marshal to JSON
+	// TODO: Check if its necessary to marshal before signing. I mean, we need an byte array, 
+	// and using JSON marshaler we got it. But maybe there is a better way?
+	tmpToSign, err := json.Marshal(extLSVID)
+	if err != nil {
+		return "", errs.New("Error generating json: %v", err)
+	} 
+
+	// Sign extlSVID
+	hash 	:= hash256.Sum256(tmpToSign)
+	s, err := key.Sign(rand.Reader, hash[:], crypto.SHA256)
+	if err != nil {
+		return "", errs.New("Error generating signed assertion: %v", err)
+	} 
+
+	// Set extLSVID signature
+	extLSVID.Signature = s
+
+	// Encode signed LSVID
+	outLSVID, err := h.EncodeLSVID(extLSVID)
+	if err != nil {
+		return "", errs.New("Error encoding LSVID: %v", err)
+	} 
+
+	return outLSVID, nil
+
 }

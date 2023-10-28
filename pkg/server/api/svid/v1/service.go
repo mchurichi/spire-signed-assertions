@@ -30,15 +30,15 @@ import (
 
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
-	PK	string		`json:"pk,omitempty"`
+	PK	[]byte		`json:"pk,omitempty"`
 	LS	*LSVID		`json:"ls,omitempty"`
 }
 
 type Payload struct {
 	Ver int8		`json:"ver,omitempty"`
 	Alg string		`json:"alg,omitempty"`
-	Iss	*IDClaim	`json:"iss,omitempty"`
 	Iat	int64		`json:"iat,omitempty"`
+	Iss	*IDClaim	`json:"iss,omitempty"`
 	Sub	*IDClaim	`json:"sub,omitempty"`
 	Aud	*IDClaim	`json:"aud,omitempty"`
 }
@@ -319,6 +319,35 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 		return nil, api.MakeErr(log, status.Code(err), "rejecting request due to JWT signing request rate limiting", err)
 	}
 
+	// Add root public key to iss.PK
+    // Unmarshal the decoded byte slice into your struct
+
+	log.Printf("req.Audience: %s\n", req.Audience[0])
+	tmp, err := base64.RawURLEncoding.DecodeString(req.Audience[0])
+	if err 	!= nil {
+		return nil, api.MakeErr(log, codes.NotFound, "Error decoding: %s\n", err)
+	}
+
+
+    var decPayload *Payload
+    err = json.Unmarshal(tmp, &decPayload)
+    if err != nil {
+        return nil, api.MakeErr(log, codes.NotFound, "error unmarshalling LSVID: %v", err)
+    }
+
+	// Marshal the public key to DER format
+	log.Printf("JWTPubKey result: %v\n", s.ca.JWTPubKey())
+	rootPK, err := x509.MarshalPKIXPublicKey(s.ca.JWTPubKey())
+	if err != nil {
+		return nil, api.MakeErr(log, codes.Internal, "Failed to marshal public key:", err)
+	}
+
+	decPayload.Iss.PK = rootPK
+
+	jsonData, err := json.Marshal(decPayload)
+	if err != nil {
+		return nil, api.MakeErr(log, codes.NotFound, "Error marshaling data to JSON", nil)
+	}
 	// // Add Trust bundle LSVID payload as first LSVID
 	// // payload := s.getTrustBundleLSVID(ctx)
 	// payload, err := s.getBundleLSVIDPayload(ctx)
@@ -330,8 +359,9 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 	// payload = append(payload, req.Audience...)
 
 	// Request signature of all LSVID payloads
-	fmt.Printf("Value to be signed: %v\n", req.Audience)
-	lsvid, err := s.ca.SignLSVID(ctx, req.Audience)
+
+	// fmt.Printf("Value to be signed: %v\n", jsonData)
+	lsvid, err := s.ca.SignLSVID(ctx, []string{base64.RawURLEncoding.EncodeToString(jsonData)})
 	if err != nil {
 		return nil, api.MakeErr(log, codes.Internal, "failed to sign JWT-SVID", err)
 	}
@@ -468,15 +498,15 @@ func (s *Service) getTrustBundleLSVID(ctx context.Context) []string {
 	return tbList
 }
 
-func (s *Service) getBundleLSVIDPayload(ctx context.Context) ([]string, error) {
+// func (s *Service) getBundleLSVIDPayload(ctx context.Context) ([]string, error) {
 
-	log := rpccontext.Logger(ctx)
-	tbLSR, err := s.cert2LSR(ctx)
-	if err != nil {
-		return nil, api.MakeErr(log, status.Code(err), "Error generating LSR", err)
-	}
-	return []string{tbLSR}, nil
-}
+// 	log := rpccontext.Logger(ctx)
+// 	tbLSR, err := s.cert2LSR(ctx)
+// 	if err != nil {
+// 		return nil, api.MakeErr(log, status.Code(err), "Error generating LSR", err)
+// 	}
+// 	return []string{tbLSR}, nil
+// }
 
 // Create an LSVID sign request given a x509 certificate.
 // Format: version.issuer.subject.subjpublickey.expiration.signature
@@ -488,50 +518,50 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 	var sub  string
 	var pub interface{}
 
-	if len(cert) == 0 {
-		sub = s.td.IDString()
+	// if len(cert) == 0 {
+	// 	sub = s.td.IDString()
 
-		// Get the CA pub key using JWTKey
-		cakey := s.ca.JWTPubKey()
-		if cakey == nil {
-			return "", api.MakeErr(log, codes.NotFound, "JWTPubKey not found", nil)
-		}
-		pub = cakey.(*ecdsa.PublicKey)
+	// 	// Get the CA pub key using JWTKey
+	// 	cakey := s.ca.JWTPubKey()
+	// 	if cakey == nil {
+	// 		return "", api.MakeErr(log, codes.NotFound, "JWTPubKey not found", nil)
+	// 	}
+	// 	// pub = cakey.(*ecdsa.PublicKey)
 
-		// Get CA pub key using X509CA
-		// cakey := s.ca.X509PubKey()
-		// if cakey == nil {
-		// 	return "", api.MakeErr(log, codes.NotFound, "JWTPubKey not found", nil)
-		// }
-		// pub = cakey.(*ecdsa.PublicKey)
+	// 	// Get CA pub key using X509CA
+	// 	// cakey := s.ca.X509PubKey()
+	// 	// if cakey == nil {
+	// 	// 	return "", api.MakeErr(log, codes.NotFound, "JWTPubKey not found", nil)
+	// 	// }
+	// 	// pub = cakey.(*ecdsa.PublicKey)
 		
-		// generate encoded public key
-		tmppk, err := x509.MarshalPKIXPublicKey(pub)
-		if err != nil {
-			return "", api.MakeErr(log, codes.NotFound, "Error Marshalling Public Key", nil)
-		}
-		capubkey :=  base64.RawURLEncoding.EncodeToString(tmppk)
+	// 	// generate encoded public key
+	// 	tmppk, err := x509.MarshalPKIXPublicKey(pub)
+	// 	if err != nil {
+	// 		return "", api.MakeErr(log, codes.NotFound, "Error Marshalling Public Key", nil)
+	// 	}
+	// 	capubkey :=  base64.RawURLEncoding.EncodeToString(tmppk)
 
-		tmpPayload = &Payload{
-			Ver:	0,
-			Alg:	"ES256",
-			Iat:	time.Now().Round(0).Unix(),
-			Iss:	&IDClaim{
-				CN:	s.td.IDString(),
-				PK:	capubkey,
-			},
-			Sub:	&IDClaim{
-				CN:	s.td.IDString(),
-				PK:	capubkey,
-			},
-		}
+	// 	tmpPayload = &Payload{
+	// 		Ver:	0,
+	// 		Alg:	"ES256",
+	// 		Iat:	time.Now().Round(0).Unix(),
+	// 		Iss:	&IDClaim{
+	// 			CN:	s.td.IDString(),
+	// 			PK:	cakey,
+	// 		},
+	// 		Sub:	&IDClaim{
+	// 			CN:	s.td.IDString(),
+	// 			PK:	tmppk,
+	// 		},
+	// 	}
 
-		jsonData, err = json.Marshal(tmpPayload)
-		if err != nil {
-			return "", api.MakeErr(log, codes.NotFound, "Error marshaling data to JSON", nil)
-		}
+	// 	jsonData, err = json.Marshal(tmpPayload)
+	// 	if err != nil {
+	// 		return "", api.MakeErr(log, codes.NotFound, "Error marshaling data to JSON", nil)
+	// 	}
 
-	} else {	 
+	// } else {	 
 		// Get the CA pub key using JWTKey
 		cakey := s.ca.JWTPubKey()
 		if cakey == nil {
@@ -543,7 +573,7 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		if err != nil {
 			return "", api.MakeErr(log, codes.NotFound, "Error Marshalling Public Key", nil)
 		}
-		capubkey :=  base64.RawURLEncoding.EncodeToString(tmpPKCA)
+		// capubkey :=  base64.RawURLEncoding.EncodeToString(tmpPKCA)
 
 		sub = cert[0].URIs[0].String()
 		pub = cert[0].PublicKey.(*ecdsa.PublicKey)
@@ -552,19 +582,19 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		if err != nil {
 			return "", api.MakeErr(log, codes.NotFound, "Error Marshalling Public Key", nil)
 		}
-		pubkey :=  base64.RawURLEncoding.EncodeToString(tmpPKSub)
+		// pubkey :=  base64.RawURLEncoding.EncodeToString(tmpPKSub)
 
-		tmpPayload := &Payload{
+		tmpPayload = &Payload{
 			Ver:	1,
 			Alg:	"ES256",
 			Iat:	time.Now().Round(0).Unix(),
 			Iss:	&IDClaim{
 				CN:	s.td.IDString(),
-				PK:	capubkey,
+				PK:	tmpPKCA,
 			},
 			Sub:	&IDClaim{
 				CN:	sub,
-				PK:	pubkey,
+				PK:	tmpPKSub,
 			},
 		}
 
@@ -572,7 +602,7 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		if err != nil {
 			return "", api.MakeErr(log, codes.NotFound, "Error marshaling data to JSON", nil)
 		}
-	}
+	// }
 	
 	fmt.Printf("LSVID payload : %s\n", jsonData)
 	fmt.Printf("Encoded LSVID payload : %s\n", base64.RawURLEncoding.EncodeToString([]byte(jsonData)))

@@ -30,15 +30,15 @@ import (
 
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
-	PK	string		`json:"pk,omitempty"`
+	PK	[]byte		`json:"pk,omitempty"`
 	LS	*LSVID		`json:"ls,omitempty"`
 }
 
 type Payload struct {
 	Ver int8		`json:"ver,omitempty"`
 	Alg string		`json:"alg,omitempty"`
-	Iss	*IDClaim	`json:"iss,omitempty"`
 	Iat	int64		`json:"iat,omitempty"`
+	Iss	*IDClaim	`json:"iss,omitempty"`
 	Sub	*IDClaim	`json:"sub,omitempty"`
 	Aud	*IDClaim	`json:"aud,omitempty"`
 }
@@ -328,41 +328,40 @@ func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) 
 		return "", errs.New("No payloads to sign")
 	}
 
-	for i:=0;i<len(payloads);i++ {
-
-		fmt.Printf("Signing payload %v of %v: %v\n\n", i+1, len(payloads), payloads[i])
-		
-		hash 	:= hash256.Sum256([]byte(payloads[i]))
-		s, err 	:= signKey.Signer.Sign(rand.Reader, hash[:], crypto.SHA256)
-		if err 	!= nil {
-			fmt.Printf("Error signing: %s\n", err)
-			return "", err
-		}
-
-		// Concatenate payload and signature
-		var decPayload Payload
-		err = json.Unmarshal([]byte(payloads[i]), &decPayload)
-		if err != nil {
-			return "", errs.New("error unmarshaling LSVID payload: %v", err)
-		}
-
-		// Create the resulting LSVID
-		outputLSVID := LSVID{
-			Payload: &decPayload,
-			Signature: s,
-		}
-
-		fmt.Printf("Decoded LSVID: %v\n\n", outputLSVID)
-
-
-		encLSVID, err = ca.EncodeLSVID(outputLSVID)
-		if err != nil {
-			return "", errs.New("error encoding LSVID: %v", err)
-		}
-
-
-		fmt.Printf("Encoded LSVID: %v\n\n", encLSVID)
+	tmp, err := base64.RawURLEncoding.DecodeString(payloads[0])
+	if err 	!= nil {
+		return "", errs.New("Error decoding: %s\n", err)
 	}
+	fmt.Printf("Payload to be hashed: %s\n", tmp)
+	hash 	:= hash256.Sum256(tmp)
+
+	fmt.Printf("Corresponding Public key: %s\n", ca.JWTPubKey())
+	s, err 	:= signKey.Signer.Sign(rand.Reader, hash[:], crypto.SHA256)
+	if err 	!= nil {
+		return "", errs.New("Error signing: %s\n", err)
+	}
+
+	// Concatenate payload and signature
+	var decPayload Payload
+	err = json.Unmarshal(tmp, &decPayload)
+	if err != nil {
+		return "", errs.New("error unmarshaling LSVID payload: %v", err)
+	}
+
+	// Create the resulting LSVID
+	outputLSVID := LSVID{
+		Payload:	&decPayload,
+		Signature:	s,
+	}
+	fmt.Printf("Decoded LSVID: %v\n\n", outputLSVID)
+
+	encLSVID, err = ca.EncodeLSVID(outputLSVID)
+	if err != nil {
+		return "", errs.New("error encoding LSVID: %v", err)
+	}
+
+	fmt.Printf("Encoded LSVID: %v\n\n", encLSVID)
+
 	return encLSVID, nil
 }
 
@@ -390,8 +389,8 @@ func createCertificate(template, parent *x509.Certificate, pub, priv interface{}
 }
 
 func (ca *CA) JWTPubKey() crypto.PublicKey {
-	ca.mu.RLock()
-	defer ca.mu.RUnlock()
+	// ca.mu.RLock()
+	// defer ca.mu.RUnlock()
 
 	jwtKey := ca.jwtKey
 
