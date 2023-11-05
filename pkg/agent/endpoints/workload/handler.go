@@ -40,11 +40,10 @@ import (
 	mint "github.com/golang-jwt/jwt"
 )
 
-
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
 	PK	[]byte		`json:"pk,omitempty"`
-	LS	*LSVID		`json:"ls,omitempty"`
+	ID	*Token		`json:"id,omitempty"`
 }
 
 type Payload struct {
@@ -56,16 +55,20 @@ type Payload struct {
 	Aud	*IDClaim	`json:"aud,omitempty"`
 }
 
-type LSVID struct {	
-	Previous	*LSVID		`json:"previous,omitempty"`
+type Token struct {	
+	Nested		*Token		`json:"nested,omitempty"`
 	Payload		*Payload	`json:"payload"`
 	Signature	[]byte		`json:"signature"`
 }
 
+type LSVID struct {
+	Token		*Token		`json:"token"`
+	Bundle		*Token		`json:"bundle"`
+}
+
 // type Layer struct {	
-// 	// Prev	*LSVID		`json:"prev,omitempty"`
-// 	Pla		*Payload
-// 	Sig		[]byte
+// 	Payload		*Payload
+// 	Signature	[]byte
 // }
 
 // type LSVID struct {	
@@ -113,7 +116,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	// Retrieve workload identity
 	selectors, err := h.c.Attestor.Attest(ctx)
 	if err != nil {
-		log.WithError(err).Error("Workload attestation failed")
+		log.WithError(err).Errorf("Workload attestation failed\n")
 		return nil, err
 	}
 	identities := h.c.Manager.MatchingIdentities(selectors)
@@ -121,12 +124,12 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	// Generate LSVID payload using workload identity
 	wlPayload, err := h.cert2LSR(identities[0].SVID[0], h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v\n", err)
 	}
 
 	lsvidPayload, err := json.Marshal(wlPayload)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v\n", err)
 	}
 	// encode payload
 	encodedPayload := base64.RawURLEncoding.EncodeToString(lsvidPayload)
@@ -134,15 +137,15 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	// Retrieve the workload SPIFFE-ID
 	wlSpiffeId, err := spiffeid.FromString(identities[0].Entry.SpiffeId)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v\n", err)
 	}
 
 	// Sign workload LSR using modified FetchJWTSVID endpoint
 	svid, err := h.c.Manager.FetchJWTSVID(ctx, wlSpiffeId, []string{encodedPayload})
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v\n", err)
 	}
-	log.Info("Workload LSVID signed by server	: ", fmt.Sprintf("%s", svid))
+	log.Info("Workload LSVID signed by server	: %s\n", fmt.Sprintf("%s", svid))
 
 	// // Generate Agent LSVID to test embedding it in issuer claim
 
@@ -150,13 +153,13 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	// TODO Create a func to create LSR without using a x509 cert
 	agentPayload, err := h.cert2LSR(h.c.AgentSVID[0], h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v\n", err)
 	}
 
 	//  Marshal payload
 	agentLSVIDPayload, err := json.Marshal(agentPayload)
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v\n", err)
 	}
 	// encode payload
 	agentEncodedPayload := base64.RawURLEncoding.EncodeToString(agentLSVIDPayload)
@@ -165,19 +168,19 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	agentSpiffeId, err := spiffeid.FromString(h.c.AgentSVID[0].URIs[0].String())
 	// spiffeid.New("example.org", h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v\n", err)
 	}
 
 	// Sign workload LSR using modified FetchJWTSVID endpoint
 	agentLSVID, err := h.c.Manager.FetchJWTSVID(ctx, agentSpiffeId, []string{agentEncodedPayload})
 	if err != nil {
-		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v\n", err)
 	}
 
 	// decode agent LSVID to LSVID struct
 	decAgentLSVID, err := h.DecodeLSVID(agentLSVID.Token)
 	if err != nil {
-		log.Fatalf("Error decoding LSVID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
 	} 
 
 	// Now, extend LSVID using agent key.
@@ -187,7 +190,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 		Iat:	time.Now().Round(0).Unix(),
 		Iss:	&IDClaim{
 			CN:	h.c.AgentSVID[0].URIs[0].String(),
-			LS:	decAgentLSVID,
+			ID:	decAgentLSVID,
 		},
 		Aud:	&IDClaim{
 			CN:	wlSpiffeId.String(),
@@ -197,19 +200,45 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	// decode svid.token to LSVID struct
 	decLSVID, err := h.DecodeLSVID(svid.Token)
 	if err != nil {
-		log.Fatalf("Error decoding LSVID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
 	} 
 
 	extLSVID, err := h.ExtendLSVID(decLSVID, extendedPayload, h.c.AgentPrivKey)
 	if err != nil {
-		log.Fatalf("Error extending LSVID: %v", err)
+		return nil, status.Errorf(codes.Unavailable, "Error extending LSVID: %v\n", err)
 	} 
+
+	// decode svid.token to LSVID struct
+	decExtLSVID, err := h.DecodeLSVID(extLSVID)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
+	} 
+
+	bundle, err := h.GetTrustbundle(ctx, h.c.AgentSVID[1])
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Error retrieving LSVID trust bundle: %v\n", err)
+	} 
+
+	// create the LSVID in new format with bundle
+	finalLSVID := LSVID{
+		Token:		decExtLSVID,
+		Bundle:		bundle,
+	}
+
+	// Marshal the LSVID struct into JSON
+	lsvidJSON, err := json.Marshal(finalLSVID)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "error marshaling LSVID to JSON: %v", err)
+	}
+
+	// Encode the JSON byte slice to Base64.RawURLEncoded string
+	encLSVID := base64.RawURLEncoding.EncodeToString(lsvidJSON)
 
 	// Format response
 	resp = new(workload.JWTSVIDResponse)
 	resp.Svids = append(resp.Svids, &workload.JWTSVID{
 		SpiffeId: identities[0].Entry.SpiffeId,
-		Svid:     extLSVID,
+		Svid:     encLSVID,
 	})
 
 	return resp, nil
@@ -233,13 +262,13 @@ func (h *Handler) FetchJWTBundles(req *workload.JWTBundlesRequest, stream worklo
 			return err
 		}
 
-		log.Info("SPIFFE-ID		: ", fmt.Sprintf("%s", h.c.AgentSVID[i].URIs[0].String()))
-		log.Info("LSVID	Payoad	: ", fmt.Sprintf("%s", &lsvidPayload))
+		log.Info("SPIFFE-ID		: %s\n", fmt.Sprintf("%s", h.c.AgentSVID[i].URIs[0].String()))
+		log.Info("LSVID	Payoad	: %s\n", fmt.Sprintf("%s", &lsvidPayload))
 	}
 	
 	selectors, err := h.c.Attestor.Attest(ctx)
 	if err != nil {
-		log.WithError(err).Error("Workload attestation failed")
+		log.WithError(err).Errorf("Workload attestation failed\n")
 		return err
 	}
 
@@ -814,7 +843,7 @@ func (h *Handler) cert2LSR(cert *x509.Certificate, audience string) (*Payload, e
 	return lsvidPayload, nil
 }
 
-func (h *Handler) EncodeLSVID(lsvid *LSVID) (string, error) {
+func (h *Handler) EncodeLSVID(lsvid *Token) (string, error) {
 	// Marshal the LSVID struct into JSON
 	lsvidJSON, err := json.Marshal(lsvid)
 	if err != nil {
@@ -827,7 +856,7 @@ func (h *Handler) EncodeLSVID(lsvid *LSVID) (string, error) {
 	return encLSVID, nil
 }
 
-func (h *Handler) DecodeLSVID(encLSVID string) (*LSVID, error) {
+func (h *Handler) DecodeLSVID(encLSVID string) (*Token, error) {
 
 	fmt.Printf("LSVID to be decoded: %s", encLSVID)
     // Decode the base64.RawURLEncoded LSVID
@@ -839,7 +868,7 @@ func (h *Handler) DecodeLSVID(encLSVID string) (*LSVID, error) {
 	fmt.Printf("Decoded LSVID to be unmarshaled: %s", decoded)
 
     // Unmarshal the decoded byte slice into your struct
-    var decLSVID LSVID
+    var decLSVID Token
     err = json.Unmarshal(decoded, &decLSVID)
     if err != nil {
         return nil, errs.New("error unmarshalling LSVID: %v", err)
@@ -848,11 +877,11 @@ func (h *Handler) DecodeLSVID(encLSVID string) (*LSVID, error) {
     return &decLSVID, nil
 }
 
-func (h *Handler) ExtendLSVID(lsvid *LSVID, newPayload *Payload, key crypto.Signer) (string, error) {
+func (h *Handler) ExtendLSVID(lsvid *Token, newPayload *Payload, key crypto.Signer) (string, error) {
 
 	// Create the extended LSVID structure
-	extLSVID := &LSVID{
-		Previous:	lsvid,
+	extLSVID := &Token{
+		Nested:		lsvid,
 		Payload:	newPayload,
 	}
 
@@ -882,4 +911,40 @@ func (h *Handler) ExtendLSVID(lsvid *LSVID, newPayload *Payload, key crypto.Sign
 
 	return outLSVID, nil
 
+}
+
+func (h *Handler) GetTrustbundle(ctx context.Context, svid *x509.Certificate) (*Token, error) {
+	trustBundlePayload, err := h.cert2LSR(svid, svid.URIs[0].String())
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v\n", err)
+	}
+
+	//  Marshal payload
+	bundleLSVIDPayload, err := json.Marshal(trustBundlePayload)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Error marshalling payload: %v\n", err)
+	}
+	// encode payload
+	bundleEncodedPayload := base64.RawURLEncoding.EncodeToString(bundleLSVIDPayload)
+
+	// Retrieve the workload SPIFFE-ID
+	bundleSpiffeId, err := spiffeid.FromString(svid.URIs[0].String())
+	// spiffeid.New("example.org", h.c.AgentSVID[0].URIs[0].String())
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v\n", err)
+	}
+
+	// Sign workload LSR using modified FetchJWTSVID endpoint
+	trustBundleLSVID, err := h.c.Manager.FetchJWTSVID(ctx, bundleSpiffeId, []string{bundleEncodedPayload})
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "could not fetch JWT-SVID: %v\n", err)
+	}
+
+	// decode agent LSVID to LSVID struct
+	decBundleLSVID, err := h.DecodeLSVID(trustBundleLSVID.Token)
+	if err != nil {
+		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
+	} 
+
+	return decBundleLSVID, nil
 }

@@ -28,10 +28,11 @@ import (
 	"crypto/ecdsa"
 )
 
+
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
 	PK	[]byte		`json:"pk,omitempty"`
-	LS	*LSVID		`json:"ls,omitempty"`
+	ID	*Token		`json:"id,omitempty"`
 }
 
 type Payload struct {
@@ -43,10 +44,15 @@ type Payload struct {
 	Aud	*IDClaim	`json:"aud,omitempty"`
 }
 
-type LSVID struct {	
-	Previous	*LSVID		`json:"previous,omitempty"`
+type Token struct {	
+	Nested		*Token		`json:"nested,omitempty"`
 	Payload		*Payload	`json:"payload"`
 	Signature	[]byte		`json:"signature"`
+}
+
+type LSVID struct {
+	Token		*Token		`json:"token"`
+	Bundle		*Token		`json:"bundle"`
 }
 
 

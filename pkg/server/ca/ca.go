@@ -31,7 +31,7 @@ import (
 type IDClaim struct {
 	CN	string		`json:"cn,omitempty"`
 	PK	[]byte		`json:"pk,omitempty"`
-	LS	*LSVID		`json:"ls,omitempty"`
+	ID	*Token		`json:"id,omitempty"`
 }
 
 type Payload struct {
@@ -43,10 +43,15 @@ type Payload struct {
 	Aud	*IDClaim	`json:"aud,omitempty"`
 }
 
-type LSVID struct {	
-	Previous	*LSVID		`json:"previous,omitempty"`
+type Token struct {	
+	Nested		*Token		`json:"nested,omitempty"`
 	Payload		*Payload	`json:"payload"`
 	Signature	[]byte		`json:"signature"`
+}
+
+type LSVID struct {
+	Token		*Token		`json:"token"`
+	Bundle		*Token		`json:"bundle"`
 }
 
 const (
@@ -349,7 +354,7 @@ func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) 
 	}
 
 	// Create the resulting LSVID
-	outputLSVID := LSVID{
+	outputLSVID := Token{
 		Payload:	&decPayload,
 		Signature:	s,
 	}
@@ -389,8 +394,8 @@ func createCertificate(template, parent *x509.Certificate, pub, priv interface{}
 }
 
 func (ca *CA) JWTPubKey() crypto.PublicKey {
-	// ca.mu.RLock()
-	// defer ca.mu.RUnlock()
+	ca.mu.RLock()
+	defer ca.mu.RUnlock()
 
 	jwtKey := ca.jwtKey
 
@@ -409,7 +414,7 @@ func (ca *CA) X509PubKey() crypto.PublicKey {
 }
 
 
-func (ca *CA) EncodeLSVID(lsvid LSVID) (string, error) {
+func (ca *CA) EncodeLSVID(lsvid Token) (string, error) {
 	// Marshal the LSVID struct into JSON
 	lsvidJSON, err := json.Marshal(lsvid)
 	if err != nil {
@@ -422,19 +427,19 @@ func (ca *CA) EncodeLSVID(lsvid LSVID) (string, error) {
 	return encLSVID, nil
 }
 
-func (ca *CA) DecodeLSVID(encLSVID string) (LSVID, error) {
+func (ca *CA) DecodeLSVID(encLSVID string) (Token, error) {
 
 	// Decode the base64.RawURLEncoded LSVID
 	decoded, err := base64.RawURLEncoding.DecodeString(encLSVID)
 	if err != nil {
-		return LSVID{}, errs.New("error decoding LSVID: %v", err)
+		return Token{}, errs.New("error decoding LSVID: %v", err)
 	}
 
 	// Unmarshal the byte slice into your struct
-	var decLSVID LSVID
+	var decLSVID Token
 	err = json.Unmarshal(decoded, &decLSVID)
 	if err != nil {
-		return LSVID{}, errs.New("error unmarshaling LSVID: %v", err)
+		return Token{}, errs.New("error unmarshaling LSVID: %v", err)
 	}
 
 	return decLSVID, nil
