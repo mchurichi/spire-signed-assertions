@@ -5,4 +5,4 @@ This is a proof-of-concept version of SPIRE that supports [Lightweight SVID](htt
 The modifications made to the original SPIRE are:
 - The FetchJWTSVID endpoint allows workloads to fetch their LSVID. All other endpoints were kept untouched.  
 - The `/opt/spire/conf/agent/agent.conf`
-- The environment `script start_spire_env.sh`
+- The environment script `start_spire_env.sh`
