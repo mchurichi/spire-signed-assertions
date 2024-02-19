@@ -18,6 +18,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	telemetry_server "github.com/spiffe/spire/pkg/common/telemetry/server"
 	"github.com/spiffe/spire/pkg/common/x509util"
+
 	// "github.com/spiffe/spire/pkg/server/api"
 	"github.com/zeebo/errs"
 
@@ -337,10 +338,10 @@ func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) 
 	if err 	!= nil {
 		return "", errs.New("Error decoding: %s\n", err)
 	}
-	fmt.Printf("Payload to be hashed: %s\n", tmp)
+	// fmt.Printf("Payload to be hashed: %s\n", tmp)
 	hash 	:= hash256.Sum256(tmp)
 
-	fmt.Printf("Corresponding Public key: %s\n", ca.JWTPubKey())
+	// fmt.Printf("Corresponding Public key: %s\n", ca.JWTPubKey())
 	s, err 	:= signKey.Signer.Sign(rand.Reader, hash[:], crypto.SHA256)
 	if err 	!= nil {
 		return "", errs.New("Error signing: %s\n", err)
@@ -358,14 +359,14 @@ func (ca *CA) SignLSVID(ctx context.Context, payloads []string) (string, error) 
 		Payload:	&decPayload,
 		Signature:	s,
 	}
-	fmt.Printf("Decoded LSVID: %v\n\n", outputLSVID)
+	// fmt.Printf("Decoded LSVID: %v\n\n", outputLSVID)
 
 	encLSVID, err = ca.EncodeLSVID(outputLSVID)
 	if err != nil {
 		return "", errs.New("error encoding LSVID: %v", err)
 	}
 
-	fmt.Printf("Encoded LSVID: %v\n\n", encLSVID)
+	// fmt.Printf("Encoded LSVID: %v\n\n", encLSVID)
 
 	return encLSVID, nil
 }

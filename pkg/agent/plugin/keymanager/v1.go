@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/rsa"
 	"crypto/x509"
+	"fmt"
 	"io"
 
 	keymanagerv1 "github.com/spiffe/spire-plugin-sdk/proto/spire/plugin/agent/keymanager/v1"
@@ -147,6 +148,7 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
 
+	fmt.Printf("2. [signContext] SignDataRequest with KeyId %s and fingerprint %s\n", s.id, s.fingerprint)
 	req := &keymanagerv1.SignDataRequest{
 		KeyId: s.id,
 		Data:  digest,
@@ -175,6 +177,7 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 		return nil, s.v1.Error(codes.Internal, "plugin returned empty signature data")
 	}
 	if resp.KeyFingerprint != s.fingerprint {
+		fmt.Println("[signContext] Fingerprint mismatch on the agent side")
 		return nil, s.v1.Errorf(codes.Internal, "fingerprint %q on key %q does not match %q", s.fingerprint, s.id, resp.KeyFingerprint)
 	}
 	return resp.Signature, nil

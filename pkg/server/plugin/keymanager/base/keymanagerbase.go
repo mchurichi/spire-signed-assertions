@@ -188,6 +188,7 @@ func (m *Base) signData(req *keymanagerv1.SignDataRequest) (*keymanagerv1.SignDa
 		return nil, status.Errorf(codes.InvalidArgument, "unsupported signer opts type %T", opts)
 	}
 
+	fmt.Println("[signData] req.KeyId: ", req.KeyId)
 	privateKey, fingerprint, ok := m.getPrivateKeyAndFingerprint(req.KeyId)
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "no such key %q", req.KeyId)

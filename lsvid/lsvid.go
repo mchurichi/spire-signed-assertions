@@ -5,22 +5,21 @@ package lsvid
 // https://docs.google.com/document/d/15rfAkzNTQa1ycs-fn9hyIYV5HbznPBsxB-f0vxhNJ24/edit?usp=drive_link
 
 import (
-
 	"context"
-	"fmt"
-	"encoding/base64"
-	"encoding/json"
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
 	hash256 "crypto/sha256"
 	"crypto/x509"
-	"crypto/ecdsa"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"log"
-	"github.com/spiffe/go-spiffe/v2/workloadapi"
-	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
-	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	"time"
 
+	"github.com/spiffe/go-spiffe/v2/svid/jwtsvid"
+	"github.com/spiffe/go-spiffe/v2/svid/x509svid"
+	"github.com/spiffe/go-spiffe/v2/workloadapi"
 )
 
 type LSVID struct {
@@ -101,8 +100,10 @@ func Extend(lsvid *Token, newPayload *agentPayload, key crypto.Signer) (string, 
 
 	// Sign extlSVID
 	hash 	:= hash256.Sum256(tmpToSign)
+	fmt.Println("1. Preparing to sign the extended LSVID")
 	s, err := key.Sign(rand.Reader, hash[:], crypto.SHA256)
 	if err != nil {
+		fmt.Println("Crashes here? 2")
 		return "", fmt.Errorf("Error generating signed assertion: %v\n", err)
 	} 
 

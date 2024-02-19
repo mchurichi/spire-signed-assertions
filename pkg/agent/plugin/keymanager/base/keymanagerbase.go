@@ -159,6 +159,7 @@ func (m *Base) generateKey(ctx context.Context, req *keymanagerv1.GenerateKeyReq
 }
 
 func (m *Base) signData(req *keymanagerv1.SignDataRequest) (*keymanagerv1.SignDataResponse, error) {
+	fmt.Println("3. Signing data on the keymanager agent side")
 	if req.KeyId == "" {
 		return nil, status.Error(codes.InvalidArgument, "key id is required")
 	}
@@ -197,6 +198,8 @@ func (m *Base) signData(req *keymanagerv1.SignDataRequest) (*keymanagerv1.SignDa
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "keypair %q signing operation failed: %v", req.KeyId, err)
 	}
+
+	fmt.Println("4. Signed with keyFingerprint: ", fingerprint)
 
 	return &keymanagerv1.SignDataResponse{
 		Signature:      signature,

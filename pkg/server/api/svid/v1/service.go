@@ -11,6 +11,7 @@ import (
 	svidv1 "github.com/spiffe/spire-api-sdk/proto/spire/api/server/svid/v1"
 	"github.com/spiffe/spire-api-sdk/proto/spire/api/types"
 	"github.com/spiffe/spire/pkg/common/idutil"
+
 	// "github.com/spiffe/spire/pkg/common/jwtsvid"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/x509util"
@@ -22,10 +23,10 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"fmt"
+	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
-	"crypto/ecdsa"
+	"fmt"
 )
 
 
@@ -328,7 +329,7 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 	// Add root public key to iss.PK
     // Unmarshal the decoded byte slice into your struct
 
-	log.Printf("req.Audience: %s\n", req.Audience[0])
+	// log.Printf("req.Audience: %s\n", req.Audience[0])
 	tmp, err := base64.RawURLEncoding.DecodeString(req.Audience[0])
 	if err 	!= nil {
 		return nil, api.MakeErr(log, codes.NotFound, "Error decoding: %s\n", err)
@@ -371,7 +372,7 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 	if err != nil {
 		return nil, api.MakeErr(log, codes.Internal, "failed to sign JWT-SVID", err)
 	}
-	fmt.Printf("Signed LSVID: %s\n", lsvid)
+	// fmt.Printf("Signed LSVID: %s\n", lsvid)
 
 	outLSVID := &types.JWTSVID{
 		Token:		lsvid,
@@ -379,7 +380,7 @@ func (s *Service) NewJWTSVID(ctx context.Context, req *svidv1.NewJWTSVIDRequest)
 		ExpiresAt:	time.Now().Add(3 * time.Minute).Unix(), 
 	}
 	// log.Debug("resulting outLSVID: ", outLSVID)
-	fmt.Printf("resulting outLSVID: %s\n", outLSVID)
+	// fmt.Printf("resulting outLSVID: %s\n", outLSVID)
 
 	response := &svidv1.NewJWTSVIDResponse{
 		Svid: outLSVID,
@@ -610,8 +611,8 @@ func (s *Service) cert2LSR(ctx context.Context, cert ...*x509.Certificate) (stri
 		}
 	// }
 	
-	fmt.Printf("LSVID payload : %s\n", jsonData)
-	fmt.Printf("Encoded LSVID payload : %s\n", base64.RawURLEncoding.EncodeToString([]byte(jsonData)))
+	// fmt.Printf("LSVID payload : %s\n", jsonData)
+	// fmt.Printf("Encoded LSVID payload : %s\n", base64.RawURLEncoding.EncodeToString([]byte(jsonData)))
 
 	return fmt.Sprintf("%s", jsonData), nil
 }

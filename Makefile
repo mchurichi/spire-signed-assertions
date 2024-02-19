@@ -294,11 +294,13 @@ images: spire-server-image spire-agent-image k8s-workload-registrar-image oidc-d
 spire-server-image: Dockerfile
 	docker build --build-arg goversion=$(go_version_full) --target spire-server -t spire-server .
 	docker tag spire-server:latest spire-server:latest-local
+	kind load docker-image -n deep-lineage-demo spire-server:latest-local
 
 .PHONY: spire-agent-image
 spire-agent-image: Dockerfile
 	docker build --build-arg goversion=$(go_version_full) --target spire-agent -t spire-agent .
 	docker tag spire-agent:latest spire-agent:latest-local
+	kind load docker-image -n deep-lineage-demo spire-agent:latest-local
 
 .PHONY: k8s-workload-registrar-image
 k8s-workload-registrar-image: Dockerfile

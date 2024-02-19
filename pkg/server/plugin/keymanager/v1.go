@@ -147,6 +147,7 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 	ctx, cancel := context.WithTimeout(ctx, rpcTimeout)
 	defer cancel()
 
+	s.v1.Log.Debug("[signContext] Signing data with key", s.id)
 	req := &keymanagerv1.SignDataRequest{
 		KeyId: s.id,
 		Data:  digest,
@@ -166,8 +167,11 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 			HashAlgorithm: s.v1.convertHashAlgorithm(opts.HashFunc()),
 		}
 	}
+	s.v1.Log.Debugf("[signContext] Request: %s", req)
 
 	resp, err := s.v1.KeyManagerPluginClient.SignData(ctx, req)
+	s.v1.Log.Debugf("[signContext] Response Signature: %s KeyFingerprint: %s", string(resp.Signature), resp.KeyFingerprint)
+
 	if err != nil {
 		return nil, s.v1.WrapErr(err)
 	}
@@ -175,6 +179,7 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 		return nil, s.v1.Error(codes.Internal, "plugin returned empty signature data")
 	}
 	if resp.KeyFingerprint != s.fingerprint {
+		s.v1.Log.Debugf("[signContext] Fingerprint mismatch on the server")
 		return nil, s.v1.Errorf(codes.Internal, "fingerprint %q on key %q does not match %q", s.fingerprint, s.id, resp.KeyFingerprint)
 	}
 	return resp.Signature, nil

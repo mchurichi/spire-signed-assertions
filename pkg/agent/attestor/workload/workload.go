@@ -74,7 +74,7 @@ func (wla *attestor) Attest(ctx context.Context, pid int) []*common.Selector {
 	// hard-to-filter details if we're not careful (e.g. issue #1537). Only log
 	// if it is not the agent itself.
 	if pid != os.Getpid() {
-		log.WithField(telemetry.Selectors, selectors).Debug("PID attested to have selectors")
+		// log.WithField(telemetry.Selectors, selectors).Debug("PID attested to have selectors")
 	}
 	return selectors
 }
