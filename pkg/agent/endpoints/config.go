@@ -16,10 +16,7 @@ import (
 	"github.com/spiffe/spire/pkg/agent/manager"
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"google.golang.org/grpc/health/grpc_health_v1"
-
 	// to selectors assertion
-	"github.com/spiffe/spire/pkg/agent/plugin/keymanager"
-	"crypto/x509"
 )
 
 type Config struct {
@@ -47,10 +44,6 @@ type Config struct {
 	AllowedForeignJWTClaims []string
 
 	TrustDomain spiffeid.TrustDomain
-
-	AgentPrivKey keymanager.Key
-
-	AgentSVID []*x509.Certificate
 
 	// Hooks used by the unit tests to assert that the configuration provided
 	// to each handler is correct and return fake handlers.

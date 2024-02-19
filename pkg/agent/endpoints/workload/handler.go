@@ -16,6 +16,7 @@ import (
 	"github.com/spiffe/spire/pkg/agent/api/rpccontext"
 	"github.com/spiffe/spire/pkg/agent/client"
 	"github.com/spiffe/spire/pkg/agent/manager/cache"
+	"github.com/spiffe/spire/pkg/agent/svid"
 	"github.com/spiffe/spire/pkg/common/bundleutil"
 	"github.com/spiffe/spire/pkg/common/jwtsvid"
 	"github.com/spiffe/spire/pkg/common/telemetry"
@@ -28,13 +29,14 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	// to selectors assertion
-	"github.com/spiffe/spire/pkg/agent/plugin/keymanager"
 	"crypto/ecdsa"
-	"encoding/base64"
-	"strings"
 	"crypto/rand"
 	hash256 "crypto/sha256"
+	"encoding/base64"
 	"encoding/pem"
+	"strings"
+
+	"github.com/spiffe/spire/pkg/agent/plugin/keymanager"
 
 	// "github.com/spiffe/go-spiffe/v2/svid/x509svid"
 	mint "github.com/golang-jwt/jwt"
@@ -80,6 +82,7 @@ type Manager interface {
 	MatchingIdentities([]*common.Selector) []cache.Identity
 	FetchJWTSVID(ctx context.Context, spiffeID spiffeid.ID, audience []string) (*client.JWTSVID, error)
 	FetchWorkloadUpdate([]*common.Selector) *cache.WorkloadUpdate
+	GetCurrentCredentials() svid.State
 }
 
 type Attestor interface {
@@ -93,8 +96,6 @@ type Config struct {
 	AllowUnauthenticatedVerifiers bool
 	AllowedForeignJWTClaims       map[string]struct{}
 	TrustDomain                   spiffeid.TrustDomain
-	AgentPrivKey				  keymanager.Key
-	AgentSVID					  []*x509.Certificate
 }
 
 type Handler struct {
@@ -113,6 +114,9 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 
 	log := rpccontext.Logger(ctx)
 
+	agentSvid, _ := h.getCurrentCredentials()
+
+
 	// Retrieve workload identity
 	selectors, err := h.c.Attestor.Attest(ctx)
 	if err != nil {
@@ -122,7 +126,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	identities := h.c.Manager.MatchingIdentities(selectors)
 
 	// Generate LSVID payload using workload identity
-	wlPayload, err := h.cert2LSR(identities[0].SVID[0], h.c.AgentSVID[0].URIs[0].String())
+	wlPayload, err := h.cert2LSR(identities[0].SVID[0], agentSvid[0].URIs[0].String())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v\n", err)
 	}
@@ -151,7 +155,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 
 	// Generate LSR from Agent certificate
 	// TODO Create a func to create LSR without using a x509 cert
-	agentPayload, err := h.cert2LSR(h.c.AgentSVID[0], h.c.AgentSVID[0].URIs[0].String())
+	agentPayload, err := h.cert2LSR(agentSvid[0], agentSvid[0].URIs[0].String())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error converting cert to LSR: %v\n", err)
 	}
@@ -165,7 +169,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 	agentEncodedPayload := base64.RawURLEncoding.EncodeToString(agentLSVIDPayload)
 
 	// Retrieve the workload SPIFFE-ID
-	agentSpiffeId, err := spiffeid.FromString(h.c.AgentSVID[0].URIs[0].String())
+	agentSpiffeId, err := spiffeid.FromString(agentSvid[0].URIs[0].String())
 	// spiffeid.New("example.org", h.c.AgentSVID[0].URIs[0].String())
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "could not fetch SPIFFE-ID: %v\n", err)
@@ -185,12 +189,12 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 
 	// Now, extend LSVID using agent key.
 	extendedPayload := &Payload{
-		Ver:	1,
-		Alg:	"ES256",
-		Iat:	time.Now().Round(0).Unix(),
-		Iss:	&IDClaim{
-			CN:	h.c.AgentSVID[0].URIs[0].String(),
-			ID:	decAgentLSVID,
+		Ver: 1,
+		Alg: "ES256",
+		Iat: time.Now().Round(0).Unix(),
+		Iss: &IDClaim{
+			CN: agentSvid[0].URIs[0].String(),
+			ID: decAgentLSVID,
 		},
 		Aud:	&IDClaim{
 			CN:	wlSpiffeId.String(),
@@ -203,7 +207,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
 	} 
 
-	extLSVID, err := h.ExtendLSVID(decLSVID, extendedPayload, h.c.AgentPrivKey)
+	extLSVID, err := h.ExtendLSVID(decLSVID, extendedPayload)
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error extending LSVID: %v\n", err)
 	} 
@@ -214,7 +218,7 @@ func (h *Handler) FetchJWTSVID(ctx context.Context, req *workload.JWTSVIDRequest
 		return nil, status.Errorf(codes.Unavailable, "Error decoding LSVID: %v\n", err)
 	} 
 
-	bundle, err := h.GetTrustbundle(ctx, h.c.AgentSVID[1])
+	bundle, err := h.GetTrustbundle(ctx, agentSvid[1])
 	if err != nil {
 		return nil, status.Errorf(codes.Unavailable, "Error retrieving LSVID trust bundle: %v\n", err)
 	} 
@@ -249,10 +253,12 @@ func (h *Handler) FetchJWTBundles(req *workload.JWTBundlesRequest, stream worklo
 	ctx := stream.Context()
 	log := rpccontext.Logger(ctx)
 
+	svid, _ := h.getCurrentCredentials()
+
 	// Create the experimental lightweight-SVID for Agent and all bundle
-	for i:=0; i< len(h.c.AgentSVID); i++ { 
+	for i := 0; i < len(svid); i++ {
 		// lsvid, err := cert2LSVID(h.c.AgentSVID[0].URIs[0].String(), h.c.AgentSVID[i], h.c.AgentPrivKey, "")
-		tmpPayload, err := h.cert2LSR(h.c.AgentSVID[i], h.c.AgentSVID[0].URIs[0].String())
+		tmpPayload, err := h.cert2LSR(svid[i], svid[0].URIs[0].String())
 		if err != nil {
 			return err
 		}
@@ -262,7 +268,7 @@ func (h *Handler) FetchJWTBundles(req *workload.JWTBundlesRequest, stream worklo
 			return err
 		}
 
-		log.Info("SPIFFE-ID		: %s\n", fmt.Sprintf("%s", h.c.AgentSVID[i].URIs[0].String()))
+		log.Info("SPIFFE-ID		: %s\n", fmt.Sprintf("%s", svid[i].URIs[0].String()))
 		log.Info("LSVID	Payoad	: %s\n", fmt.Sprintf("%s", &lsvidPayload))
 	}
 	
@@ -625,6 +631,11 @@ func (h *Handler) getWorkloadBundles(selectors []*common.Selector) (bundles []*b
 	return bundles
 }
 
+func (h *Handler) getCurrentCredentials() (svid []*x509.Certificate, key crypto.Signer) {
+	state := h.c.Manager.GetCurrentCredentials()
+	return state.SVID, state.Key
+}
+
 func marshalBundle(certs []*x509.Certificate) []byte {
 	bundle := []byte{}
 	for _, c := range certs {
@@ -877,7 +888,9 @@ func (h *Handler) DecodeLSVID(encLSVID string) (*Token, error) {
     return &decLSVID, nil
 }
 
-func (h *Handler) ExtendLSVID(lsvid *Token, newPayload *Payload, key crypto.Signer) (string, error) {
+func (h *Handler) ExtendLSVID(lsvid *Token, newPayload *Payload) (string, error) {
+	
+	_, key := h.getCurrentCredentials()
 
 	// Create the extended LSVID structure
 	extLSVID := &Token{

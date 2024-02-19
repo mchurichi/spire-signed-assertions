@@ -71,8 +71,6 @@ func New(c Config) *Endpoints {
 		AllowUnauthenticatedVerifiers: c.AllowUnauthenticatedVerifiers,
 		AllowedForeignJWTClaims:       allowedClaims,
 		TrustDomain:                   c.TrustDomain,
-		AgentPrivKey:				   c.AgentPrivKey,
-		AgentSVID:					   c.AgentSVID,
 	})
 
 	sdsv2Server := c.newSDSv2Server(sdsv2.Config{
