@@ -170,7 +170,7 @@ func (s *v1Key) signContext(ctx context.Context, digest []byte, opts crypto.Sign
 	s.v1.Log.Debugf("[signContext] Request: %s", req)
 
 	resp, err := s.v1.KeyManagerPluginClient.SignData(ctx, req)
-	s.v1.Log.Debugf("[signContext] Response Signature: %s KeyFingerprint: %s", string(resp.Signature), resp.KeyFingerprint)
+	// s.v1.Log.Debugf("[signContext] Response Signature: %s KeyFingerprint: %s", string(resp.Signature), resp.KeyFingerprint)
 
 	if err != nil {
 		return nil, s.v1.WrapErr(err)
